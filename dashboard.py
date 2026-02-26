@@ -264,36 +264,134 @@ def main():
     page = st.sidebar.selectbox(
         "Select Analysis",
         [
-            "🏠 Overview",
+            "🏠 Overview & Commuters",
+            "🔄 Transit Patterns",
             "🚕 Trip Analytics",
             "💰 Financial Metrics",
             "👥 User Behavior",
-            "🔄 Transit Patterns",
             "📍 Geographic Insights"
         ]
     )
 
     # Route to appropriate page
-    if page == "🏠 Overview":
+    if page == "🏠 Overview & Commuters":
         show_overview(analytics, trips, users)
+    elif page == "🔄 Transit Patterns":
+        show_transit_patterns(analytics, trips, users)
     elif page == "🚕 Trip Analytics":
         show_trip_analytics(analytics, trips)
     elif page == "💰 Financial Metrics":
         show_financial_metrics(analytics, trips)
     elif page == "👥 User Behavior":
         show_user_behavior(analytics, trips, users)
-    elif page == "🔄 Transit Patterns":
-        show_transit_patterns(analytics, trips, users)
     elif page == "📍 Geographic Insights":
         show_geographic_insights(analytics, trips)
 
 
 def show_overview(analytics, trips, users):
-    """Display overview dashboard"""
-    st.header("📊 Overview Dashboard")
+    """Display overview dashboard with Corridor Commuters as primary feature"""
+    st.header("🎯 Lagos Ride-Hailing Intelligence")
 
-    # Get overview metrics (cached)
     analytics_id = st.session_state.get('analytics_id', 0)
+
+    # ============ PRIMARY FEATURE: CORRIDOR COMMUTERS ============
+    st.subheader("🎯 Corridor Commuters - Target Customer Lists")
+    st.markdown("""
+    **Users who travel the same corridor in BOTH directions during morning AND evening hours.**
+    These are verified daily commuters - your highest-value targets for EV services.
+    """)
+
+    with st.spinner("Loading commuter corridors..."):
+        try:
+            commuter_corridors = get_cached_commuter_corridors(analytics_id, min_users=3, min_trips=2)
+            if commuter_corridors is None:
+                commuter_corridors = analytics.get_all_commuter_corridors(min_users=3, min_trips=2)
+
+            if commuter_corridors is not None and not commuter_corridors.empty:
+                # Key metrics
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Corridors", f"{len(commuter_corridors):,}")
+                with col2:
+                    st.metric("Total Commuters", f"{commuter_corridors['total_users'].sum():,}")
+                with col3:
+                    st.metric("Total Trips", f"{commuter_corridors['total_trips'].sum():,}")
+                with col4:
+                    st.metric("Total Spend", f"₦{commuter_corridors['total_spent'].sum():,.0f}")
+
+                # Corridor selector
+                st.markdown("---")
+                st.write("**Select a corridor to view & download commuter contact list:**")
+
+                selected_corridor = st.selectbox(
+                    "Choose Corridor",
+                    options=commuter_corridors['corridor'].tolist(),
+                    format_func=lambda x: f"{x} ({commuter_corridors[commuter_corridors['corridor']==x]['total_users'].values[0]} users)",
+                    key="overview_corridor_select"
+                )
+
+                if selected_corridor:
+                    with st.spinner(f"Loading users for {selected_corridor}..."):
+                        corridor_users = get_cached_corridor_users(analytics_id, selected_corridor, min_trips=2)
+                        if corridor_users is None:
+                            corridor_users = analytics.get_corridor_users_with_contacts(selected_corridor, min_trips=2)
+
+                    if corridor_users is not None and not corridor_users.empty:
+                        col1, col2 = st.columns([3, 1])
+
+                        with col1:
+                            st.write(f"**{len(corridor_users)} verified commuters** (Name, Phone, Email)")
+                            display_users = corridor_users.copy()
+                            if 'total_spent' in display_users.columns:
+                                display_users['total_spent'] = display_users['total_spent'].apply(lambda x: f"₦{x:,.0f}")
+                            st.dataframe(display_users, hide_index=True, use_container_width=True)
+
+                        with col2:
+                            # Excel download
+                            excel_buffer = io.BytesIO()
+                            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                corridor_users.to_excel(writer, sheet_name='Commuters', index=False)
+                            excel_buffer.seek(0)
+                            safe_filename = selected_corridor.replace(' ', '_').replace('/', '-').replace('↔', 'to')[:50]
+
+                            st.download_button(
+                                label=f"📥 Download Excel",
+                                data=excel_buffer,
+                                file_name=f"commuters_{safe_filename}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="overview_download"
+                            )
+
+                            # Download all button
+                            if st.button("📥 Download ALL Corridors", key="overview_download_all"):
+                                with st.spinner("Generating..."):
+                                    all_buffer = io.BytesIO()
+                                    with pd.ExcelWriter(all_buffer, engine='openpyxl') as writer:
+                                        for corridor in commuter_corridors['corridor'].tolist():
+                                            users_df = analytics.get_corridor_users_with_contacts(corridor, min_trips=2)
+                                            if users_df is not None and not users_df.empty:
+                                                sheet_name = corridor[:28].replace('/', '-').replace('↔', '-')
+                                                users_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                                    all_buffer.seek(0)
+                                    st.download_button(
+                                        label="📥 Download Now",
+                                        data=all_buffer,
+                                        file_name="all_corridor_commuters.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key="overview_download_all_file"
+                                    )
+            else:
+                st.info("Loading corridor data... Please wait.")
+
+        except Exception as e:
+            st.error(f"Error loading corridors: {str(e)}")
+
+    st.markdown("---")
+    st.markdown("---")
+
+    # ============ SECONDARY: OVERVIEW METRICS ============
+    st.subheader("📊 Dataset Overview")
+
     trip_overview = get_cached_trip_overview(analytics_id) or analytics.get_trip_overview()
     revenue_overview = get_cached_revenue_overview(analytics_id) or analytics.get_revenue_overview()
 
@@ -825,13 +923,116 @@ def show_geographic_insights(analytics, trips):
 def show_transit_patterns(analytics, trips, users):
     """Display transit pattern analytics - users with similar routes and timing"""
     st.header("🔄 Transit Pattern Analytics")
-    st.markdown("Identify users with similar pickup/dropoff locations and travel times")
 
-    # Transit Pattern Summary
-    st.subheader("Pattern Overview")
+    analytics_id = st.session_state.get('analytics_id', 0)
+
+    # ============ PRIMARY: CORRIDOR COMMUTERS (moved to top) ============
+    st.subheader("🎯 Corridor Commuters (To & Fro, Morning & Evening)")
+    st.markdown("""
+    Users who travel **both directions** on a corridor during **morning AND evening** hours.
+    These are your most consistent commuters - ideal targets for EV services.
+    """)
+
+    with st.spinner("Analyzing bidirectional commuter patterns..."):
+        try:
+            commuter_corridors = get_cached_commuter_corridors(analytics_id, min_users=3, min_trips=2)
+            if commuter_corridors is None:
+                commuter_corridors = analytics.get_all_commuter_corridors(min_users=3, min_trips=2)
+
+            if commuter_corridors is not None and not commuter_corridors.empty:
+                st.write(f"**Found {len(commuter_corridors)} corridors with regular commuters**")
+
+                # Show corridor summary
+                corridor_display = commuter_corridors.copy()
+                corridor_display['total_spent'] = corridor_display['total_spent'].apply(lambda x: f"₦{x:,.0f}")
+                corridor_display['avg_trips_per_user'] = corridor_display['avg_trips_per_user'].apply(lambda x: f"{x:.1f}")
+
+                st.dataframe(
+                    corridor_display[['corridor', 'total_users', 'total_trips', 'avg_trips_per_user', 'total_spent']],
+                    hide_index=True, use_container_width=True
+                )
+
+                st.markdown("---")
+
+                # Corridor selector
+                st.write("**Select a corridor to view commuters with contact details:**")
+
+                selected_corridor = st.selectbox(
+                    "Choose Corridor",
+                    options=commuter_corridors['corridor'].tolist(),
+                    format_func=lambda x: f"{x} ({commuter_corridors[commuter_corridors['corridor']==x]['total_users'].values[0]} users)",
+                    key="transit_corridor_select"
+                )
+
+                if selected_corridor:
+                    with st.spinner(f"Loading users for {selected_corridor}..."):
+                        corridor_users = get_cached_corridor_users(analytics_id, selected_corridor, min_trips=2)
+                        if corridor_users is None:
+                            corridor_users = analytics.get_corridor_users_with_contacts(selected_corridor, min_trips=2)
+
+                    if corridor_users is not None and not corridor_users.empty:
+                        st.write(f"**{len(corridor_users)} commuters on this corridor:**")
+
+                        # Format for display
+                        display_users = corridor_users.copy()
+                        if 'total_spent' in display_users.columns:
+                            display_users['total_spent'] = display_users['total_spent'].apply(lambda x: f"₦{x:,.0f}")
+
+                        st.dataframe(display_users, hide_index=True, use_container_width=True)
+
+                        # Excel download
+                        excel_buffer = io.BytesIO()
+                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                            corridor_users.to_excel(writer, sheet_name='Commuters', index=False)
+                        excel_buffer.seek(0)
+
+                        safe_filename = selected_corridor.replace(' ', '_').replace('/', '-').replace('↔', 'to')[:50]
+
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.download_button(
+                                label=f"📥 Download {len(corridor_users)} users as Excel",
+                                data=excel_buffer,
+                                file_name=f"commuters_{safe_filename}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="transit_download_single"
+                            )
+
+                        with col2:
+                            if st.button("📥 Generate ALL Corridors Excel", key="transit_download_all_btn"):
+                                with st.spinner("Generating..."):
+                                    all_buffer = io.BytesIO()
+                                    with pd.ExcelWriter(all_buffer, engine='openpyxl') as writer:
+                                        for corridor in commuter_corridors['corridor'].tolist():
+                                            users_df = analytics.get_corridor_users_with_contacts(corridor, min_trips=2)
+                                            if users_df is not None and not users_df.empty:
+                                                sheet_name = corridor[:28].replace('/', '-').replace('↔', '-')
+                                                users_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                                    all_buffer.seek(0)
+                                    st.download_button(
+                                        label="📥 Download Now",
+                                        data=all_buffer,
+                                        file_name="all_corridor_commuters.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key="transit_download_all_file"
+                                    )
+                    else:
+                        st.info("No qualifying commuters found for this corridor")
+            else:
+                st.info("No corridors with regular morning+evening commuters found")
+
+        except Exception as e:
+            st.error(f"Error analyzing corridors: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
+
+    st.markdown("---")
+    st.markdown("---")
+
+    # ============ SECONDARY: PATTERN OVERVIEW ============
+    st.subheader("📊 Pattern Overview")
 
     with st.spinner("Analyzing transit patterns..."):
-        analytics_id = st.session_state.get('analytics_id', 0)
         summary = get_cached_transit_summary(analytics_id)
         if summary is None:
             summary = analytics.get_transit_pattern_summary()
@@ -1017,116 +1218,6 @@ def show_transit_patterns(analytics, trips, users):
         except Exception as e:
             st.error(f"Error clustering users: {str(e)}")
             st.info("Try adjusting the number of segments or loading more data")
-
-    st.markdown("---")
-
-    # Bidirectional Corridor Commuters with Contact Details
-    st.subheader("🎯 Corridor Commuters (To & Fro, Morning & Evening)")
-    st.markdown("""
-    Users who travel **both directions** on a corridor during **morning AND evening** hours.
-    These are your most consistent commuters - ideal targets for EV services.
-    """)
-
-    with st.spinner("Analyzing bidirectional commuter patterns..."):
-        try:
-            analytics_id = st.session_state.get('analytics_id', 0)
-            commuter_corridors = get_cached_commuter_corridors(analytics_id, min_users=3, min_trips=2)
-            if commuter_corridors is None:
-                commuter_corridors = analytics.get_all_commuter_corridors(min_users=3, min_trips=2)
-
-            if not commuter_corridors.empty:
-                st.write(f"**Found {len(commuter_corridors)} corridors with regular commuters**")
-
-                # Show corridor summary
-                corridor_display = commuter_corridors.copy()
-                corridor_display['total_spent'] = corridor_display['total_spent'].apply(lambda x: f"₦{x:,.0f}")
-                corridor_display['avg_trips_per_user'] = corridor_display['avg_trips_per_user'].apply(lambda x: f"{x:.1f}")
-
-                st.dataframe(
-                    corridor_display[['corridor', 'total_users', 'total_trips', 'avg_trips_per_user', 'total_spent']],
-                    hide_index=True, use_container_width=True
-                )
-
-                st.markdown("---")
-
-                # Corridor selector
-                st.write("**Select a corridor to view commuters with contact details:**")
-
-                selected_corridor = st.selectbox(
-                    "Choose Corridor",
-                    options=commuter_corridors['corridor'].tolist(),
-                    format_func=lambda x: f"{x} ({commuter_corridors[commuter_corridors['corridor']==x]['total_users'].values[0]} users)"
-                )
-
-                if selected_corridor:
-                    with st.spinner(f"Loading users for {selected_corridor}..."):
-                        corridor_users = get_cached_corridor_users(analytics_id, selected_corridor, min_trips=2)
-                        if corridor_users is None:
-                            corridor_users = analytics.get_corridor_users_with_contacts(selected_corridor, min_trips=2)
-
-                    if not corridor_users.empty:
-                        st.write(f"**{len(corridor_users)} commuters on this corridor:**")
-
-                        # Format for display
-                        display_users = corridor_users.copy()
-                        if 'total_spent' in display_users.columns:
-                            display_users['total_spent'] = display_users['total_spent'].apply(lambda x: f"₦{x:,.0f}")
-
-                        st.dataframe(display_users, hide_index=True, use_container_width=True)
-
-                        # Excel download
-                        import io
-
-                        # Prepare Excel file
-                        excel_buffer = io.BytesIO()
-                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                            corridor_users.to_excel(writer, sheet_name='Commuters', index=False)
-                        excel_buffer.seek(0)
-
-                        # Create safe filename
-                        safe_filename = selected_corridor.replace(' ', '_').replace('/', '-').replace('↔', 'to')[:50]
-
-                        st.download_button(
-                            label=f"📥 Download {len(corridor_users)} users as Excel",
-                            data=excel_buffer,
-                            file_name=f"commuters_{safe_filename}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-
-                        # Also offer download all corridors
-                        st.markdown("---")
-                        st.write("**Download all corridor commuters:**")
-
-                        if st.button("📥 Generate Excel for ALL Corridors"):
-                            with st.spinner("Generating Excel file with all corridors..."):
-                                all_excel_buffer = io.BytesIO()
-                                with pd.ExcelWriter(all_excel_buffer, engine='openpyxl') as writer:
-                                    for corridor in commuter_corridors['corridor'].tolist():
-                                        users_df = analytics.get_corridor_users_with_contacts(corridor, min_trips=2)
-                                        if not users_df.empty:
-                                            # Create safe sheet name (max 31 chars)
-                                            sheet_name = corridor[:28].replace('/', '-').replace('↔', '-')
-                                            users_df.to_excel(writer, sheet_name=sheet_name, index=False)
-                                all_excel_buffer.seek(0)
-
-                                st.download_button(
-                                    label="📥 Download ALL Corridors Excel",
-                                    data=all_excel_buffer,
-                                    file_name="all_corridor_commuters.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    key="download_all"
-                                )
-                    else:
-                        st.info("No qualifying commuters found for this corridor")
-            else:
-                st.info("No corridors with regular morning+evening commuters found")
-
-        except Exception as e:
-            st.error(f"Error analyzing corridors: {str(e)}")
-            import traceback
-            st.code(traceback.format_exc())
-
-    st.markdown("---")
 
     # Find Similar Users
     st.subheader("Find Similar Users")
