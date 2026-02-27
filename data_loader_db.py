@@ -9,10 +9,19 @@ from psycopg2.extras import RealDictCursor
 import os
 import streamlit as st
 
-# Database connection
-DATABASE_URL = os.environ.get('DATABASE_URL',
-    'postgresql://neondb_owner:npg_fCtsPZ71AmuK@ep-cold-darkness-abvv50co-pooler.eu-west-2.aws.neon.tech/neondb?sslmode=require'
-)
+# Database connection - check Streamlit secrets first, then env var
+def get_database_url():
+    # Try Streamlit secrets first (for Streamlit Cloud)
+    try:
+        return st.secrets["DATABASE_URL"]
+    except:
+        pass
+    # Fall back to environment variable
+    return os.environ.get('DATABASE_URL',
+        'postgresql://neondb_owner:npg_fCtsPZ71AmuK@ep-cold-darkness-abvv50co-pooler.eu-west-2.aws.neon.tech/neondb?sslmode=require'
+    )
+
+DATABASE_URL = get_database_url()
 
 
 class DatabaseLoader:
