@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import folium
 from streamlit_folium import folium_static
-from data_loader import RideDataLoader
+from data_loader_db import RideDataLoader
 from analytics import RideAnalytics
 import warnings
 import io
@@ -36,9 +36,9 @@ st.markdown("""
 
 @st.cache_data
 def load_data(sample_frac=None):
-    """Load and cache data"""
+    """Load and cache data from database"""
     loader = RideDataLoader()
-    trips, users = loader.load_all(use_dask=True, sample_frac=sample_frac)
+    trips, users = loader.load_all(sample_frac=sample_frac)
     return trips, users
 
 

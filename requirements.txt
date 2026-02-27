@@ -22,3 +22,6 @@ scipy>=1.11.0
 
 # Export & Reporting
 openpyxl>=3.1.0
+
+# Database
+psycopg2-binary>=2.9.0
