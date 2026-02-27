@@ -9,19 +9,26 @@ from psycopg2.extras import RealDictCursor
 import os
 import streamlit as st
 
-# Database connection - check Streamlit secrets first, then env var
+# Database connection - lazy loading to ensure st.secrets is available
+_DATABASE_URL = None
+
 def get_database_url():
+    global _DATABASE_URL
+    if _DATABASE_URL is not None:
+        return _DATABASE_URL
+
     # Try Streamlit secrets first (for Streamlit Cloud)
     try:
-        return st.secrets["DATABASE_URL"]
+        _DATABASE_URL = st.secrets["DATABASE_URL"]
+        return _DATABASE_URL
     except:
         pass
-    # Fall back to environment variable
-    return os.environ.get('DATABASE_URL',
+
+    # Fall back to environment variable or default
+    _DATABASE_URL = os.environ.get('DATABASE_URL',
         'postgresql://neondb_owner:npg_fCtsPZ71AmuK@ep-cold-darkness-abvv50co-pooler.eu-west-2.aws.neon.tech/neondb?sslmode=require'
     )
-
-DATABASE_URL = get_database_url()
+    return _DATABASE_URL
 
 
 class DatabaseLoader:
@@ -33,7 +40,7 @@ class DatabaseLoader:
     def get_connection(self):
         """Get database connection"""
         if self.conn is None or self.conn.closed:
-            self.conn = psycopg2.connect(DATABASE_URL)
+            self.conn = psycopg2.connect(get_database_url())
         return self.conn
 
     def load_trips(self, sample_frac=None, limit=None):
