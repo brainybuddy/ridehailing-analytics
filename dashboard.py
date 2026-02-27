@@ -237,15 +237,16 @@ def main():
     st.sidebar.header("Data Loading")
     load_option = st.sidebar.radio(
         "Dataset Size",
-        ["Full Dataset (1.4GB)", "Sample 50%", "Sample 10%", "Sample 1%"],
+        ["Sample 10%", "Sample 25%", "Sample 50%", "Full Dataset"],
+        index=0,  # Default to 10% sample for cloud deployment
         help="Choose dataset size. Start with sample for faster loading."
     )
 
     sample_map = {
-        "Full Dataset (1.4GB)": None,
-        "Sample 50%": 0.5,
         "Sample 10%": 0.1,
-        "Sample 1%": 0.01
+        "Sample 25%": 0.25,
+        "Sample 50%": 0.5,
+        "Full Dataset": None
     }
 
     # Load data
